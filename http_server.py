@@ -36,6 +36,30 @@ def send_response(connecting_socket, file_path, header, root_folder):
             file_content = f.read(1024)
 
 
+def handle_post_request(connecting_socket, request, root_folder):
+    """
+    Handles the client PUSH request by writing the content to a file.
+
+    @param connecting_socket: The client connection socket.
+    @param request: The client HTTP request as a string.
+    @param root_folder: The root folder for server files.
+
+    @return: None
+    """
+    # Extract the file path and content from the request
+    headers, content = request.split("\r\n\r\n", 1)
+    file_path = headers.split(" ")[1]
+
+    # Write the content to the file
+    full_path = root_folder + file_path
+    with open(full_path, "wb") as f:
+        f.write(content.encode())
+
+    # Send a 201 Created response to the client
+    response_header = "HTTP/1.1 201 Created\r\n\r\n"
+    connecting_socket.sendall(response_header.encode())
+
+
 def process_request(connecting_socket, request, root_folder):
     """
     Processes the client request and sends the appropriate response.
@@ -52,16 +76,30 @@ def process_request(connecting_socket, request, root_folder):
     info = line_beginning.split(" ")
     method, request_file = info[:2]
 
+    # Handle POST request
+    if method == "POST":
+        handle_post_request(connecting_socket, request, root_folder)
+        return
+
     # Determine the response code and file path based on the request
-    code, file_path = (405, None) if method != "GET" else \
-                      (200, "/page.html") if request_file == "/" else \
-                      (404, "/404.html") if not os.path.isfile(root_folder + request_file) else \
-                      (200, request_file)
+    code, file_path = (
+        (405, None)
+        if method != "GET"
+        else (200, "/page.html")
+        if request_file == "/"
+        else (404, "/404.html")
+        if not os.path.isfile(root_folder + request_file)
+        else (200, request_file)
+    )
 
     # Determine the appropriate response header based on the code
-    header = "HTTP/1.1 200 OK\r\n" if code == 200 \
-        else "HTTP/1.1 404 Not Found\r\n" if code == 404 \
+    header = (
+        "HTTP/1.1 200 OK\r\n"
+        if code == 200
+        else "HTTP/1.1 404 Not Found\r\n"
+        if code == 404
         else "HTTP/1.1 405 Method Not Allowed \r\n"
+    )
 
     # Send the response to the client
     send_response(connecting_socket, file_path, header, root_folder)
@@ -76,7 +114,7 @@ def setup_server_socket(port):
     @return: The server socket
     """
 
-    # Setup the server socket and return it
+    # Set up the server socket and return it
     server_socket = socket.socket()
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(("", port))
@@ -98,17 +136,19 @@ def handle_client_request(conn, root_folder):
     """
 
     # Read and accumulate incoming data from the client
-    data_buffer = bytearray()
-    chunk = conn.recv(1024)
-    while chunk:
-        data_buffer.extend(chunk)
-        data_str = data_buffer.decode()
-
-        # If a complete request has been received, process it
-        if "\r\n\r\n" in data_str:
-            process_request(conn, data_str, root_folder)
-            break
+    try:
+        data_buffer = bytearray()
         chunk = conn.recv(1024)
+        while chunk:
+            data_buffer.extend(chunk)
+            data_str = data_buffer.decode()
+
+            if "\r\n\r\n" in data_str:
+                process_request(conn, data_str, root_folder)
+                break
+            chunk = conn.recv(1024)
+    except Exception as e:
+        logging.error(f"Error handling client request: {e}")
 
 
 def run(port, root_folder, delay):
@@ -151,10 +191,30 @@ def run(port, root_folder, delay):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Simple HTTP Server")
-    parser.add_argument("-p", "--port", required=False, type=int, default=8084, help="port to bind to")
-    parser.add_argument("-v", "--verbose", required=False, action="store_true", help="turn on debugging output")
-    parser.add_argument("-d", "--delay", required=False, action="store_true", help="add a delay for debugging purposes")
-    parser.add_argument("-f", "--folder", required=False, default="www", help="folder from where to serve from")
+    parser.add_argument(
+        "-p", "--port", required=False, type=int, default=8084, help="port to bind to"
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        required=False,
+        action="store_true",
+        help="turn on debugging output",
+    )
+    parser.add_argument(
+        "-d",
+        "--delay",
+        required=False,
+        action="store_true",
+        help="add a delay for debugging purposes",
+    )
+    parser.add_argument(
+        "-f",
+        "--folder",
+        required=False,
+        default="www",
+        help="folder from where to serve from",
+    )
     args = parser.parse_args()
 
     # Setup logging based on verbosity
